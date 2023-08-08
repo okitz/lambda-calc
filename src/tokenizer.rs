@@ -2,8 +2,8 @@ use std::error::Error;
 use std::fmt;
 use std::str::Chars;
 
-#[derive(Debug, Clone)]
-struct InvalidToken;
+#[derive(Debug, PartialEq, Clone)]
+pub struct InvalidToken;
 impl fmt::Display for InvalidToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "invalid token")
@@ -40,7 +40,7 @@ impl Token {
     }
 }
 
-pub fn tokenize(input: &str) -> Result<Vec<Token>, Box<dyn Error>> {
+pub fn tokenize(input: &str) -> Result<Vec<Token>, InvalidToken> {
     println!("tokenize `{}`", input);
     let mut input: Chars<'_> = input.chars();
     let mut v = Vec::new();
@@ -53,4 +53,19 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, Box<dyn Error>> {
         }
     }
     return Ok(v);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokenize_single_symbols() {
+        assert_eq!(Err(InvalidToken), tokenize("1"));
+        let s2t = |s: &str| Token::TOKEN(String::from(s));
+        assert_eq!(
+            vec![s2t("\\"), s2t("x"), s2t("."), s2t("x"), Token::EOF],
+            tokenize("\\x.x").unwrap()
+        );
+    }
 }
