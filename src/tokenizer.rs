@@ -17,7 +17,7 @@ impl Error for InvalidToken {
 
 fn is_valid_char(s: &str) -> bool {
     let c = s.chars().next().unwrap();
-    return ('a' <= c && c <= 'z') || "\\λ.:".contains(c);
+    return ('a' <= c && c <= 'z') || "\\λ.():".contains(c);
 }
 
 #[derive(Debug, PartialEq)]
@@ -62,10 +62,15 @@ mod tests {
     #[test]
     fn tokenize_single_symbols() {
         assert_eq!(Err(InvalidToken), tokenize("1"));
-        let s2t = |s: &str| Token::TOKEN(String::from(s));
-        assert_eq!(
-            vec![s2t("\\"), s2t("x"), s2t("."), s2t("x"), Token::EOF],
-            tokenize("\\x.x").unwrap()
-        );
+        let c2t = |c| Token::TOKEN(String::from(c));
+        let test_str = "\\x.(x y)";
+        let mut expect: Vec<Token> = test_str
+            .chars()
+            .into_iter()
+            .filter(|c| *c != ' ')
+            .map(c2t)
+            .collect();
+        expect.push(Token::EOF);
+        assert_eq!(expect, tokenize(test_str).unwrap());
     }
 }
