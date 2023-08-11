@@ -12,25 +12,32 @@ impl fmt::Display for InvalidToken {
 }
 impl Error for InvalidToken {}
 
-fn is_valid_char(s: &str) -> bool {
+fn is_var(s: &str) -> bool {
     let c = s.chars().next().unwrap();
-    return ('a' <= c && c <= 'z') || "\\λ.():".contains(c);
+    ('a' <= c && c <= 'z') || "\\λ.():".contains(c)
+}
+fn is_symbol(s: &str) -> bool {
+    let c = s.chars().next().unwrap();
+    ('a' <= c && c <= 'z') || "\\λ.():".contains(c)
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
-    Token(String),
+    Var(String),
+    Symbol(String),
     EOF,
 }
 impl Token {
-    fn new(input: &mut Chars<'_>) -> Result<Token, InvalidToken> {
+    pub fn new(input: &mut Chars<'_>) -> Result<Token, InvalidToken> {
         let input = input.skip_while(|c| *c == ' ');
         let s = input.take(1).collect::<String>();
 
         if s == "" {
             Ok(Token::EOF)
-        } else if is_valid_char(&s) {
-            Ok(Token::Token(s))
+        } else if is_var(&s) {
+            Ok(Token::Var(s))
+        } else if is_symbol(&s) {
+            Ok(Token::Symbol(s))
         } else {
             Err(InvalidToken)
         }
@@ -59,7 +66,7 @@ mod tests {
     #[test]
     fn tokenize_single_symbols() {
         assert_eq!(Err(InvalidToken), tokenize("1"));
-        let c2t = |c| Token::Token(String::from(c));
+        let c2t = |c| Token::Var(String::from(c));
         let test_str = "\\x.(x y)";
         let mut expect: VecDeque<Token> = test_str
             .chars()

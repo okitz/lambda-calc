@@ -1,3 +1,4 @@
+use crate::tokenizer;
 use crate::tokenizer::Token;
 use std::collections::VecDeque;
 
@@ -26,6 +27,12 @@ impl std::fmt::Display for ParseError {
     }
 }
 
+impl From<tokenizer::InvalidToken> for ParseError {
+    fn from(value: tokenizer::InvalidToken) -> Self {
+        ParseError::UnexpectedToken
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Tree {
     Var(String),
@@ -34,11 +41,18 @@ pub enum Tree {
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
-    if tok.len() > 0 && tok[0] == Token::Token(String::from(target)) {
-        tok.pop_front();
-        Ok(())
+    if tok.is_empty() {
+        Err(ParseError::SyntaxError)
     } else {
-        Err(ParseError::UnexpectedToken)
+        let mut target = target.clone();
+        let target = Token::new(&mut target.chars())?;
+        match tok[0] {
+            _ if tok[0] == target => {
+                tok.pop_front();
+                Ok(())
+            }
+            _ => Err(ParseError::UnexpectedToken),
+        }
     }
 }
 
@@ -99,7 +113,7 @@ fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
         t
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
-    } else if let Some(Token::Token(s)) = tok.pop_front() {
+    } else if let Some(Token::Var(s)) = tok.pop_front() {
         Ok(Some(Tree::Var(String::from(s))))
     } else {
         Err(ParseError::SyntaxError)
