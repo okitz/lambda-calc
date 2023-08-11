@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
 use std::str::Chars;
@@ -9,11 +10,7 @@ impl fmt::Display for InvalidToken {
         write!(f, "invalid token")
     }
 }
-impl Error for InvalidToken {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None
-    }
-}
+impl Error for InvalidToken {}
 
 fn is_valid_char(s: &str) -> bool {
     let c = s.chars().next().unwrap();
@@ -22,7 +19,7 @@ fn is_valid_char(s: &str) -> bool {
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
-    TOKEN(String),
+    Token(String),
     EOF,
 }
 impl Token {
@@ -33,26 +30,26 @@ impl Token {
         if s == "" {
             Ok(Token::EOF)
         } else if is_valid_char(&s) {
-            Ok(Token::TOKEN(s))
+            Ok(Token::Token(s))
         } else {
             Err(InvalidToken)
         }
     }
 }
 
-pub fn tokenize(input: &str) -> Result<Vec<Token>, InvalidToken> {
-    println!("tokenize `{}`", input);
+pub fn tokenize(input: &str) -> Result<VecDeque<Token>, InvalidToken> {
+    println!("tokenize '{}'", input);
     let mut input: Chars<'_> = input.chars();
-    let mut v = Vec::new();
+    let mut tstream = VecDeque::new();
     loop {
         let tok = Token::new(&mut input)?;
         let is_eof = tok == Token::EOF;
-        v.push(tok);
+        tstream.push_back(tok);
         if is_eof {
             break;
         }
     }
-    return Ok(v);
+    return Ok(tstream);
 }
 
 #[cfg(test)]
@@ -62,15 +59,15 @@ mod tests {
     #[test]
     fn tokenize_single_symbols() {
         assert_eq!(Err(InvalidToken), tokenize("1"));
-        let c2t = |c| Token::TOKEN(String::from(c));
+        let c2t = |c| Token::Token(String::from(c));
         let test_str = "\\x.(x y)";
-        let mut expect: Vec<Token> = test_str
+        let mut expect: VecDeque<Token> = test_str
             .chars()
             .into_iter()
             .filter(|c| *c != ' ')
             .map(c2t)
             .collect();
-        expect.push(Token::EOF);
+        expect.push_back(Token::EOF);
         assert_eq!(expect, tokenize(test_str).unwrap());
     }
 }
