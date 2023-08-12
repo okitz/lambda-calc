@@ -28,10 +28,7 @@ pub enum Token {
     EOF,
 }
 impl Token {
-    pub fn new(input: &mut Chars<'_>) -> Result<Token, InvalidToken> {
-        let input = input.skip_while(|c| *c == ' ');
-        let s = input.take(1).collect::<String>();
-
+    pub fn new(s: String) -> Result<Token, InvalidToken> {
         if s == "" {
             Ok(Token::EOF)
         } else if is_var(&s) {
@@ -42,6 +39,11 @@ impl Token {
             Err(InvalidToken)
         }
     }
+    pub fn new_from_chars(input: &mut Chars<'_>) -> Result<Token, InvalidToken> {
+        let input = input.skip_while(|c| *c == ' ');
+        let s = input.take(1).collect::<String>();
+        Token::new(s)
+    }
 }
 
 pub fn tokenize(input: &str) -> Result<VecDeque<Token>, InvalidToken> {
@@ -49,7 +51,7 @@ pub fn tokenize(input: &str) -> Result<VecDeque<Token>, InvalidToken> {
     let mut input: Chars<'_> = input.chars();
     let mut tstream = VecDeque::new();
     loop {
-        let tok = Token::new(&mut input)?;
+        let tok = Token::new_from_chars(&mut input)?;
         let is_eof = tok == Token::EOF;
         tstream.push_back(tok);
         if is_eof {

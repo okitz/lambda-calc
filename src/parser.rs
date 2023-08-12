@@ -28,7 +28,7 @@ impl std::fmt::Display for ParseError {
 }
 
 impl From<tokenizer::InvalidToken> for ParseError {
-    fn from(value: tokenizer::InvalidToken) -> Self {
+    fn from(_value: tokenizer::InvalidToken) -> Self {
         ParseError::UnexpectedToken
     }
 }
@@ -44,8 +44,7 @@ fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseErr
     if tok.is_empty() {
         Err(ParseError::SyntaxError)
     } else {
-        let mut target = target.clone();
-        let target = Token::new(&mut target.chars())?;
+        let target = Token::new(target.to_string())?;
         match tok[0] {
             _ if tok[0] == target => {
                 tok.pop_front();
