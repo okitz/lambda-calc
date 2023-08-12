@@ -37,7 +37,7 @@ impl From<tokenizer::InvalidToken> for ParseError {
 pub enum Tree {
     Abs(AbsNode),
     Apply(ApplyNode),
-    Var(String),
+    Var(VarNode),
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +52,12 @@ struct ApplyNode {
     right: Box<Tree>,
     is_redex: bool,
 }
+
+#[derive(Debug, Clone)]
+struct VarNode {
+    var: String,
+}
+
 impl Tree {
     pub fn find_leftmost_redex(&self) -> Option<&Tree> {
         match self {
@@ -81,9 +87,30 @@ impl Tree {
                 let rstr = make_substr(&node.right);
                 lstr + " " + &rstr
             }
-            Tree::Var(vname) => vname.clone(),
+            Tree::Var(VarNode { var: vname }) => vname.clone(),
         }
     }
+
+    // pub fn substitute(&self, param: &String, tr: Box<Tree>) {
+    //     match self {
+    //         Tree::Abs(node) => {
+    //             if node.var != param {
+    //                 node.subterm.substitute(param, tr);
+    //             }
+    //         }
+    //         Tree::Apply(node) => {
+    //             node.left.substitute(param, tr);
+    //             node.right.substitute(param, tr);
+    //         }
+    //         Tree::Var(vname) => {
+    //             if vname = param {
+    //                 match node.parent {
+
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
@@ -113,8 +140,8 @@ pub fn parse(mut tstream: VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
 fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     if consume_token(tok, "λ").is_ok() || consume_token(tok, "\\").is_ok() {
         let mut params = VecDeque::new();
-        while let Some(Tree::Var(param_name)) = primary(tok)? {
-            params.push_back(param_name);
+        while let Some(Tree::Var(node)) = primary(tok)? {
+            params.push_back(node.var);
         }
 
         // consume_token(tok, ".")?;
@@ -171,7 +198,7 @@ fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Tree::Var(s)))
+        Ok(Some(Tree::Var(VarNode { var: s })))
     } else {
         Err(ParseError::SyntaxError)
     }

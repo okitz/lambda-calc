@@ -14,11 +14,11 @@ impl Error for InvalidToken {}
 
 fn is_var(s: &str) -> bool {
     let c = s.chars().next().unwrap();
-    c.is_ascii_lowercase() || "\\λ.():".contains(c)
+    c.is_ascii_lowercase()
 }
 fn is_symbol(s: &str) -> bool {
     let c = s.chars().next().unwrap();
-    c.is_ascii_lowercase() || "\\λ.():".contains(c)
+    "\\λ.():".contains(c)
 }
 
 #[derive(Debug, PartialEq)]
