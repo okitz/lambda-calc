@@ -81,7 +81,7 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
         } else {
             Err(ParseError::SyntaxError)
         }
-    } else if tok.len() > 0 {
+    } else if tok.is_empty() {
         let mut subterms = VecDeque::new();
         while let Some(subt) = primary(tok)? {
             subterms.push_back(subt);
@@ -108,12 +108,11 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
 
 fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     if consume_token(tok, "(").is_ok() {
-        let t = term(tok);
-        t
+        term(tok)
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Tree::Var(String::from(s))))
+        Ok(Some(Tree::Var(s)))
     } else {
         Err(ParseError::SyntaxError)
     }

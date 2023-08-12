@@ -14,11 +14,11 @@ impl Error for InvalidToken {}
 
 fn is_var(s: &str) -> bool {
     let c = s.chars().next().unwrap();
-    ('a' <= c && c <= 'z') || "\\λ.():".contains(c)
+    c.is_ascii_lowercase() || "\\λ.():".contains(c)
 }
 fn is_symbol(s: &str) -> bool {
     let c = s.chars().next().unwrap();
-    ('a' <= c && c <= 'z') || "\\λ.():".contains(c)
+    c.is_ascii_lowercase() || "\\λ.():".contains(c)
 }
 
 #[derive(Debug, PartialEq)]
@@ -29,7 +29,7 @@ pub enum Token {
 }
 impl Token {
     pub fn new(s: String) -> Result<Token, InvalidToken> {
-        if s == "" {
+        if s.is_empty() {
             Ok(Token::EOF)
         } else if is_var(&s) {
             Ok(Token::Var(s))
@@ -58,7 +58,7 @@ pub fn tokenize(input: &str) -> Result<VecDeque<Token>, InvalidToken> {
             break;
         }
     }
-    return Ok(tstream);
+    Ok(tstream)
 }
 
 #[cfg(test)]
@@ -70,12 +70,7 @@ mod tests {
         assert_eq!(Err(InvalidToken), tokenize("1"));
         let c2t = |c| Token::Var(String::from(c));
         let test_str = "\\x.(x y)";
-        let mut expect: VecDeque<Token> = test_str
-            .chars()
-            .into_iter()
-            .filter(|c| *c != ' ')
-            .map(c2t)
-            .collect();
+        let mut expect: VecDeque<Token> = test_str.chars().filter(|c| *c != ' ').map(c2t).collect();
         expect.push_back(Token::EOF);
         assert_eq!(expect, tokenize(test_str).unwrap());
     }
