@@ -35,9 +35,55 @@ impl From<tokenizer::InvalidToken> for ParseError {
 
 #[derive(Debug, Clone)]
 pub enum Tree {
+    Abs(AbsNode),
+    Apply(ApplyNode),
     Var(String),
-    Abs(String, Box<Tree>),
-    Apply(Box<Tree>, Box<Tree>),
+}
+
+#[derive(Debug, Clone)]
+struct AbsNode {
+    var: String,
+    subterm: Box<Tree>,
+}
+
+#[derive(Debug, Clone)]
+struct ApplyNode {
+    left: Box<Tree>,
+    right: Box<Tree>,
+    is_redex: bool,
+}
+impl Tree {
+    pub fn find_leftmost_redex(&self) -> Option<&Tree> {
+        match self {
+            Tree::Abs(node) => node.subterm.find_leftmost_redex(),
+            Tree::Apply(node) => {
+                if node.is_redex {
+                    Some(self)
+                } else {
+                    node.left
+                        .find_leftmost_redex()
+                        .or_else(|| node.right.find_leftmost_redex())
+                }
+            }
+            Tree::Var(_) => None,
+        }
+    }
+
+    pub fn stringify(&self) -> String {
+        match self {
+            Tree::Abs(node) => format!("λ{}.{}", node.var, node.subterm.stringify()),
+            Tree::Apply(node) => {
+                let make_substr = |nd: &Box<Tree>| match **nd {
+                    Tree::Var(_) => nd.stringify(),
+                    _ => format!("({})", nd.stringify()),
+                };
+                let lstr = make_substr(&node.left);
+                let rstr = make_substr(&node.right);
+                lstr + " " + &rstr
+            }
+            Tree::Var(vname) => vname.clone(),
+        }
+    }
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
@@ -73,9 +119,15 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
 
         // consume_token(tok, ".")?;
         if let Some(subt) = term(tok)? {
-            let mut tr = Tree::Abs(params.pop_back().expect("no parameter!"), Box::new(subt));
+            let mut tr = Tree::Abs(AbsNode {
+                var: params.pop_back().expect("no parameter!"),
+                subterm: Box::new(subt),
+            });
             while let Some(param_name) = params.pop_back() {
-                tr = Tree::Abs(param_name, Box::new(tr));
+                tr = Tree::Abs(AbsNode {
+                    var: param_name,
+                    subterm: Box::new(tr),
+                });
             }
             Ok(Some(tr))
         } else {
@@ -91,12 +143,19 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
             0 => Err(ParseError::SyntaxError),
             1 => Ok(Some(subterms.pop_front().unwrap())),
             _ => {
-                let mut tr = Tree::Apply(
-                    Box::new(subterms.pop_front().unwrap()),
-                    Box::new(subterms.pop_front().unwrap()),
-                );
+                let left = subterms.pop_front().unwrap();
+                let right = subterms.pop_front().unwrap();
+                let mut tr = Tree::Apply(ApplyNode {
+                    is_redex: matches!(left, Tree::Abs(_)),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
                 while let Some(subt) = subterms.pop_front() {
-                    tr = Tree::Apply(Box::new(tr), Box::new(subt));
+                    tr = Tree::Apply(ApplyNode {
+                        is_redex: matches!(tr, Tree::Abs(_)),
+                        left: Box::new(tr),
+                        right: Box::new(subt),
+                    });
                 }
                 Ok(Some(tr))
             }
