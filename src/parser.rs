@@ -81,7 +81,7 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
         } else {
             Err(ParseError::SyntaxError)
         }
-    } else if tok.is_empty() {
+    } else if !tok.is_empty() {
         let mut subterms = VecDeque::new();
         while let Some(subt) = primary(tok)? {
             subterms.push_back(subt);
