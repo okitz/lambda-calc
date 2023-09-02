@@ -64,6 +64,13 @@ pub struct VarNode {
 }
 
 impl Tree {
+    fn set_parent(&self, parent: &Rc<Tree>) {
+        match self {
+            Tree::Abs(node) => *node.parent.borrow_mut() = Rc::downgrade(parent),
+            Tree::Apply(node) => *node.parent.borrow_mut() = Rc::downgrade(parent),
+            Tree::Var(node) => *node.parent.borrow_mut() = Rc::downgrade(parent),
+        }
+    }
     pub fn find_leftmost_redex(rc: &Rc<Tree>) -> Option<Rc<Tree>> {
         match **rc {
             Tree::Abs(ref node) => {
@@ -151,33 +158,37 @@ pub fn parse(mut tstream: VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseErro
 
 fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
     if consume_token(tok, "λ").is_ok() || consume_token(tok, "\\").is_ok() {
+        // ABS
+        // パラメタを読み込む
         let mut params = VecDeque::new();
-        while let Some(ref rc) = primary(tok)? {
-            if let Tree::Var(ref node) = **rc {
+        while let Some(rc) = primary(tok)? {
+            if let Tree::Var(ref node) = *rc {
                 params.push_back(node.var.clone());
             } else {
-                break;
+                return Err(ParseError::SyntaxError);
             }
         }
+        if params.is_empty() {
+            return Err(ParseError::SyntaxError);
+        }
 
-        if let Some(subt) = term(tok)? {
-            let mut tr = Rc::new(Tree::Abs(AbsNode {
-                parent: RefCell::new(Weak::new()),
-                var: params.pop_back().expect("no parameter!"),
-                subterm: RefCell::new(subt),
-            }));
+        if let Some(mut subt) = term(tok)? {
+            // 各パラメタについてAbsNodeを作る
             while let Some(param_name) = params.pop_back() {
-                tr = Rc::new(Tree::Abs(AbsNode {
+                let parent = Rc::new(Tree::Abs(AbsNode {
                     parent: RefCell::new(Weak::new()),
                     var: param_name,
-                    subterm: RefCell::new(tr),
+                    subterm: RefCell::new(subt.clone()),
                 }));
+                subt.set_parent(&parent);
+                subt = parent;
             }
-            Ok(Some(tr))
+            Ok(Some(subt))
         } else {
             Err(ParseError::SyntaxError)
         }
     } else if !tok.is_empty() {
+        // primary+
         let mut subterms = VecDeque::new();
         while let Some(subt) = primary(tok)? {
             subterms.push_back(subt);
@@ -187,23 +198,20 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
             0 => Err(ParseError::SyntaxError),
             1 => Ok(Some(subterms.pop_front().unwrap())),
             _ => {
-                let left = subterms.pop_front().unwrap();
-                let right = subterms.pop_front().unwrap();
-                let mut tr = Rc::new(Tree::Apply(ApplyNode {
-                    parent: RefCell::new(Weak::new()),
-                    is_redex: matches!(*left, Tree::Abs(_)),
-                    left: RefCell::new(left),
-                    right: RefCell::new(right),
-                }));
-                while let Some(subt) = subterms.pop_front() {
-                    tr = Rc::new(Tree::Apply(ApplyNode {
+                let mut left = subterms.pop_front().unwrap();
+
+                while let Some(right) = subterms.pop_front() {
+                    let parent = Rc::new(Tree::Apply(ApplyNode {
                         parent: RefCell::new(Weak::new()),
-                        is_redex: matches!(*tr, Tree::Abs(_)),
-                        left: RefCell::new(tr),
-                        right: RefCell::new(subt),
+                        is_redex: matches!(*left, Tree::Abs(_)),
+                        left: RefCell::new(left.clone()),
+                        right: RefCell::new(right.clone()),
                     }));
+                    left.set_parent(&parent);
+                    right.set_parent(&parent);
+                    left = parent;
                 }
-                Ok(Some(tr))
+                Ok(Some(left))
             }
         }
     } else {
