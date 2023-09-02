@@ -44,12 +44,14 @@ pub enum Tree {
 
 #[derive(Debug, Clone)]
 pub struct AbsNode {
+    parent: RefCell<Weak<Tree>>,
     var: String,
     subterm: RefCell<Rc<Tree>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ApplyNode {
+    parent: RefCell<Weak<Tree>>,
     left: RefCell<Rc<Tree>>,
     right: RefCell<Rc<Tree>>,
     is_redex: bool,
@@ -57,6 +59,7 @@ pub struct ApplyNode {
 
 #[derive(Debug, Clone)]
 pub struct VarNode {
+    parent: RefCell<Weak<Tree>>,
     var: String,
 }
 
@@ -141,29 +144,34 @@ fn at_eof(tok: &VecDeque<Token>) -> bool {
     tok[0] == Token::EOF
 }
 
-pub fn parse(mut tstream: VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
+pub fn parse(mut tstream: VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
     let tree = term(&mut tstream)?;
     Ok(tree)
 }
 
-fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
+fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
     if consume_token(tok, "λ").is_ok() || consume_token(tok, "\\").is_ok() {
         let mut params = VecDeque::new();
-        while let Some(Tree::Var(node)) = primary(tok)? {
-            params.push_back(node.var.clone());
+        while let Some(ref rc) = primary(tok)? {
+            if let Tree::Var(ref node) = **rc {
+                params.push_back(node.var.clone());
+            } else {
+                break;
+            }
         }
 
-        // consume_token(tok, ".")?;
         if let Some(subt) = term(tok)? {
-            let mut tr = Tree::Abs(AbsNode {
+            let mut tr = Rc::new(Tree::Abs(AbsNode {
+                parent: RefCell::new(Weak::new()),
                 var: params.pop_back().expect("no parameter!"),
-                subterm: RefCell::new(Rc::new(subt)),
-            });
+                subterm: RefCell::new(subt),
+            }));
             while let Some(param_name) = params.pop_back() {
-                tr = Tree::Abs(AbsNode {
+                tr = Rc::new(Tree::Abs(AbsNode {
+                    parent: RefCell::new(Weak::new()),
                     var: param_name,
-                    subterm: RefCell::new(Rc::new(tr)),
-                });
+                    subterm: RefCell::new(tr),
+                }));
             }
             Ok(Some(tr))
         } else {
@@ -181,17 +189,19 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
             _ => {
                 let left = subterms.pop_front().unwrap();
                 let right = subterms.pop_front().unwrap();
-                let mut tr = Tree::Apply(ApplyNode {
-                    is_redex: matches!(left, Tree::Abs(_)),
-                    left: RefCell::new(Rc::new(left)),
-                    right: RefCell::new(Rc::new(right)),
-                });
+                let mut tr = Rc::new(Tree::Apply(ApplyNode {
+                    parent: RefCell::new(Weak::new()),
+                    is_redex: matches!(*left, Tree::Abs(_)),
+                    left: RefCell::new(left),
+                    right: RefCell::new(right),
+                }));
                 while let Some(subt) = subterms.pop_front() {
-                    tr = Tree::Apply(ApplyNode {
-                        is_redex: matches!(tr, Tree::Abs(_)),
-                        left: RefCell::new(Rc::new(tr)),
-                        right: RefCell::new(Rc::new(subt)),
-                    });
+                    tr = Rc::new(Tree::Apply(ApplyNode {
+                        parent: RefCell::new(Weak::new()),
+                        is_redex: matches!(*tr, Tree::Abs(_)),
+                        left: RefCell::new(tr),
+                        right: RefCell::new(subt),
+                    }));
                 }
                 Ok(Some(tr))
             }
@@ -201,13 +211,16 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     }
 }
 
-fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
+fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
     if consume_token(tok, "(").is_ok() {
         term(tok)
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Tree::Var(VarNode { var: s })))
+        Ok(Some(Rc::new(Tree::Var(VarNode {
+            parent: RefCell::new(Weak::new()),
+            var: s,
+        }))))
     } else {
         Err(ParseError::SyntaxError)
     }
