@@ -37,21 +37,21 @@ impl From<tokenizer::InvalidToken> for ParseError {
 
 #[derive(Debug, Clone)]
 pub enum Tree {
-    Abs(Rc<AbsNode>),
-    Apply(Rc<ApplyNode>),
-    Var(Rc<VarNode>),
+    Abs(AbsNode),
+    Apply(ApplyNode),
+    Var(VarNode),
 }
 
 #[derive(Debug, Clone)]
 pub struct AbsNode {
     var: String,
-    subterm: RefCell<Tree>,
+    subterm: RefCell<Rc<Tree>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ApplyNode {
-    left: RefCell<Tree>,
-    right: RefCell<Tree>,
+    left: RefCell<Rc<Tree>>,
+    right: RefCell<Rc<Tree>>,
     is_redex: bool,
 }
 
@@ -61,20 +61,20 @@ pub struct VarNode {
 }
 
 impl Tree {
-    pub fn find_leftmost_redex(&self) -> Option<Tree> {
-        match self {
-            Tree::Abs(node) => {
+    pub fn find_leftmost_redex(rc: &Rc<Tree>) -> Option<Rc<Tree>> {
+        match **rc {
+            Tree::Abs(ref node) => {
                 let subt = node.subterm.borrow();
-                subt.find_leftmost_redex()
+                Tree::find_leftmost_redex(&*subt)
             }
-            Tree::Apply(node) => {
+            Tree::Apply(ref node) => {
                 if node.is_redex {
-                    Some(self.clone())
+                    Some(Rc::clone(&rc))
                 } else {
                     let left = node.left.borrow();
                     let right = node.right.borrow();
-                    left.find_leftmost_redex()
-                        .or_else(move || right.find_leftmost_redex())
+                    Tree::find_leftmost_redex(&*left)
+                        .or_else(move || Tree::find_leftmost_redex(&*right))
                 }
             }
             Tree::Var(_) => None,
@@ -155,15 +155,15 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
 
         // consume_token(tok, ".")?;
         if let Some(subt) = term(tok)? {
-            let mut tr = Tree::Abs(Rc::new(AbsNode {
+            let mut tr = Tree::Abs(AbsNode {
                 var: params.pop_back().expect("no parameter!"),
-                subterm: RefCell::new(subt),
-            }));
+                subterm: RefCell::new(Rc::new(subt)),
+            });
             while let Some(param_name) = params.pop_back() {
-                tr = Tree::Abs(Rc::new(AbsNode {
+                tr = Tree::Abs(AbsNode {
                     var: param_name,
-                    subterm: RefCell::new(tr),
-                }));
+                    subterm: RefCell::new(Rc::new(tr)),
+                });
             }
             Ok(Some(tr))
         } else {
@@ -181,17 +181,17 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
             _ => {
                 let left = subterms.pop_front().unwrap();
                 let right = subterms.pop_front().unwrap();
-                let mut tr = Tree::Apply(Rc::new(ApplyNode {
+                let mut tr = Tree::Apply(ApplyNode {
                     is_redex: matches!(left, Tree::Abs(_)),
-                    left: RefCell::new(left),
-                    right: RefCell::new(right),
-                }));
+                    left: RefCell::new(Rc::new(left)),
+                    right: RefCell::new(Rc::new(right)),
+                });
                 while let Some(subt) = subterms.pop_front() {
-                    tr = Tree::Apply(Rc::new(ApplyNode {
+                    tr = Tree::Apply(ApplyNode {
                         is_redex: matches!(tr, Tree::Abs(_)),
-                        left: RefCell::new(tr),
-                        right: RefCell::new(subt),
-                    }));
+                        left: RefCell::new(Rc::new(tr)),
+                        right: RefCell::new(Rc::new(subt)),
+                    });
                 }
                 Ok(Some(tr))
             }
@@ -207,7 +207,7 @@ fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Tree::Var(Rc::new(VarNode { var: s }))))
+        Ok(Some(Tree::Var(VarNode { var: s })))
     } else {
         Err(ParseError::SyntaxError)
     }
