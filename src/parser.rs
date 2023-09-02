@@ -1,6 +1,8 @@
 use crate::tokenizer;
 use crate::tokenizer::Token;
+use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::rc::{Rc, Weak};
 
 // Grammar
 // term = primary+
@@ -35,40 +37,44 @@ impl From<tokenizer::InvalidToken> for ParseError {
 
 #[derive(Debug, Clone)]
 pub enum Tree {
-    Abs(AbsNode),
-    Apply(ApplyNode),
-    Var(VarNode),
+    Abs(Rc<AbsNode>),
+    Apply(Rc<ApplyNode>),
+    Var(Rc<VarNode>),
 }
 
 #[derive(Debug, Clone)]
-struct AbsNode {
+pub struct AbsNode {
     var: String,
-    subterm: Box<Tree>,
+    subterm: RefCell<Tree>,
 }
 
 #[derive(Debug, Clone)]
-struct ApplyNode {
-    left: Box<Tree>,
-    right: Box<Tree>,
+pub struct ApplyNode {
+    left: RefCell<Tree>,
+    right: RefCell<Tree>,
     is_redex: bool,
 }
 
 #[derive(Debug, Clone)]
-struct VarNode {
+pub struct VarNode {
     var: String,
 }
 
 impl Tree {
-    pub fn find_leftmost_redex(&self) -> Option<&Tree> {
+    pub fn find_leftmost_redex(&self) -> Option<Tree> {
         match self {
-            Tree::Abs(node) => node.subterm.find_leftmost_redex(),
+            Tree::Abs(node) => {
+                let subt = node.subterm.borrow();
+                subt.find_leftmost_redex()
+            }
             Tree::Apply(node) => {
                 if node.is_redex {
-                    Some(self)
+                    Some(self.clone())
                 } else {
-                    node.left
-                        .find_leftmost_redex()
-                        .or_else(|| node.right.find_leftmost_redex())
+                    let left = node.left.borrow();
+                    let right = node.right.borrow();
+                    left.find_leftmost_redex()
+                        .or_else(move || right.find_leftmost_redex())
                 }
             }
             Tree::Var(_) => None,
@@ -77,17 +83,20 @@ impl Tree {
 
     pub fn stringify(&self) -> String {
         match self {
-            Tree::Abs(node) => format!("λ{}.{}", node.var, node.subterm.stringify()),
+            Tree::Abs(node) => {
+                let subt = node.subterm.borrow();
+                format!("λ{}.{}", node.var, subt.stringify())
+            }
             Tree::Apply(node) => {
-                let make_substr = |nd: &Box<Tree>| match **nd {
+                let make_substr = |nd: &Tree| match *nd {
                     Tree::Var(_) => nd.stringify(),
                     _ => format!("({})", nd.stringify()),
                 };
-                let lstr = make_substr(&node.left);
-                let rstr = make_substr(&node.right);
+                let lstr = make_substr(&*node.left.borrow());
+                let rstr = make_substr(&*node.right.borrow());
                 lstr + " " + &rstr
             }
-            Tree::Var(VarNode { var: vname }) => vname.clone(),
+            Tree::Var(node) => node.var.clone(),
         }
     }
 
@@ -141,20 +150,20 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     if consume_token(tok, "λ").is_ok() || consume_token(tok, "\\").is_ok() {
         let mut params = VecDeque::new();
         while let Some(Tree::Var(node)) = primary(tok)? {
-            params.push_back(node.var);
+            params.push_back(node.var.clone());
         }
 
         // consume_token(tok, ".")?;
         if let Some(subt) = term(tok)? {
-            let mut tr = Tree::Abs(AbsNode {
+            let mut tr = Tree::Abs(Rc::new(AbsNode {
                 var: params.pop_back().expect("no parameter!"),
-                subterm: Box::new(subt),
-            });
+                subterm: RefCell::new(subt),
+            }));
             while let Some(param_name) = params.pop_back() {
-                tr = Tree::Abs(AbsNode {
+                tr = Tree::Abs(Rc::new(AbsNode {
                     var: param_name,
-                    subterm: Box::new(tr),
-                });
+                    subterm: RefCell::new(tr),
+                }));
             }
             Ok(Some(tr))
         } else {
@@ -172,17 +181,17 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
             _ => {
                 let left = subterms.pop_front().unwrap();
                 let right = subterms.pop_front().unwrap();
-                let mut tr = Tree::Apply(ApplyNode {
+                let mut tr = Tree::Apply(Rc::new(ApplyNode {
                     is_redex: matches!(left, Tree::Abs(_)),
-                    left: Box::new(left),
-                    right: Box::new(right),
-                });
+                    left: RefCell::new(left),
+                    right: RefCell::new(right),
+                }));
                 while let Some(subt) = subterms.pop_front() {
-                    tr = Tree::Apply(ApplyNode {
+                    tr = Tree::Apply(Rc::new(ApplyNode {
                         is_redex: matches!(tr, Tree::Abs(_)),
-                        left: Box::new(tr),
-                        right: Box::new(subt),
-                    });
+                        left: RefCell::new(tr),
+                        right: RefCell::new(subt),
+                    }));
                 }
                 Ok(Some(tr))
             }
@@ -198,7 +207,7 @@ fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Tree>, ParseError> {
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Tree::Var(VarNode { var: s })))
+        Ok(Some(Tree::Var(Rc::new(VarNode { var: s }))))
     } else {
         Err(ParseError::SyntaxError)
     }
