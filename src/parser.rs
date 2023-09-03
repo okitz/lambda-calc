@@ -110,26 +110,29 @@ impl Tree {
         }
     }
 
-    // pub fn substitute(&self, param: &String, tr: Box<Tree>) {
-    //     match self {
-    //         Tree::Abs(node) => {
-    //             if node.var != param {
-    //                 node.subterm.substitute(param, tr);
-    //             }
-    //         }
-    //         Tree::Apply(node) => {
-    //             node.left.substitute(param, tr);
-    //             node.right.substitute(param, tr);
-    //         }
-    //         Tree::Var(vname) => {
-    //             if vname = param {
-    //                 match node.parent {
-
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    pub fn substitute(&self, param: &String, tr: Rc<Tree>) {
+        match self {
+            Tree::Abs(node) => {
+                if node.var != *param {
+                    node.subterm.borrow().substitute(param, tr);
+                }
+            }
+            Tree::Apply(node) => {
+                node.left.borrow().substitute(param, tr.clone());
+                node.right.borrow().substitute(param, tr.clone());
+            }
+            Tree::Var(node) => {
+                if node.var == *param {
+                    let new_subt = (*tr).clone();
+                    if let Some(ref parent_rc) = node.parent.borrow().upgrade() {
+                        new_subt.set_parent(parent_rc);
+                        // parentのフィールドに代入する
+                        // applyの場合、左か右かを分かるようにする必要がある
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
