@@ -42,49 +42,49 @@ pub enum Tree {
     Var(VarNode),
 }
 
+type RccellTree = Rc<RefCell<Tree>>;
+type WkcellTree = Weak<RefCell<Tree>>;
+type ParseResult = Result<Option<RccellTree>, ParseError>;
+
 #[derive(Debug, Clone)]
 pub struct AbsNode {
-    parent: RefCell<Weak<Tree>>,
+    parent: WkcellTree,
     var: String,
-    subterm: RefCell<Rc<Tree>>,
+    subterm: RccellTree,
 }
 
 #[derive(Debug, Clone)]
 pub struct ApplyNode {
-    parent: RefCell<Weak<Tree>>,
-    left: RefCell<Rc<Tree>>,
-    right: RefCell<Rc<Tree>>,
+    parent: WkcellTree,
+    left: RccellTree,
+    right: RccellTree,
     is_redex: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct VarNode {
-    parent: RefCell<Weak<Tree>>,
+    parent: WkcellTree,
     var: String,
 }
 
 impl Tree {
-    fn set_parent(&self, parent: &Rc<Tree>) {
+    fn set_parent(&mut self, parent: RccellTree) {
         match self {
-            Tree::Abs(node) => *node.parent.borrow_mut() = Rc::downgrade(parent),
-            Tree::Apply(node) => *node.parent.borrow_mut() = Rc::downgrade(parent),
-            Tree::Var(node) => *node.parent.borrow_mut() = Rc::downgrade(parent),
+            Tree::Abs(node) => node.parent = Rc::downgrade(&parent),
+            Tree::Apply(node) => node.parent = Rc::downgrade(&parent),
+            Tree::Var(node) => node.parent = Rc::downgrade(&parent),
         }
     }
-    pub fn find_leftmost_redex(rc: &Rc<Tree>) -> Option<Rc<Tree>> {
-        match **rc {
-            Tree::Abs(ref node) => {
-                let subt = node.subterm.borrow();
-                Tree::find_leftmost_redex(&*subt)
-            }
+
+    pub fn find_leftmost_redex(rc: RccellTree) -> Option<RccellTree> {
+        match *rc.borrow() {
+            Tree::Abs(ref node) => Tree::find_leftmost_redex(Rc::clone(&node.subterm)),
             Tree::Apply(ref node) => {
                 if node.is_redex {
                     Some(Rc::clone(&rc))
                 } else {
-                    let left = node.left.borrow();
-                    let right = node.right.borrow();
-                    Tree::find_leftmost_redex(&*left)
-                        .or_else(move || Tree::find_leftmost_redex(&*right))
+                    Tree::find_leftmost_redex(Rc::clone(&node.left))
+                        .or_else(move || Tree::find_leftmost_redex(Rc::clone(&node.right)))
                 }
             }
             Tree::Var(_) => None,
@@ -110,29 +110,29 @@ impl Tree {
         }
     }
 
-    pub fn substitute(&self, param: &String, tr: Rc<Tree>) {
-        match self {
-            Tree::Abs(node) => {
-                if node.var != *param {
-                    node.subterm.borrow().substitute(param, tr);
-                }
-            }
-            Tree::Apply(node) => {
-                node.left.borrow().substitute(param, tr.clone());
-                node.right.borrow().substitute(param, tr.clone());
-            }
-            Tree::Var(node) => {
-                if node.var == *param {
-                    let new_subt = (*tr).clone();
-                    if let Some(ref parent_rc) = node.parent.borrow().upgrade() {
-                        new_subt.set_parent(parent_rc);
-                        // parentのフィールドに代入する
-                        // applyの場合、左か右かを分かるようにする必要がある
-                    }
-                }
-            }
-        }
-    }
+    // pub fn substitute(&self, param: &String, tr: Rc<Tree>) {
+    //     match self {
+    //         Tree::Abs(node) => {
+    //             if node.var != *param {
+    //                 node.subterm.borrow().substitute(param, tr);
+    //             }
+    //         }
+    //         Tree::Apply(node) => {
+    //             node.left.borrow().substitute(param, tr.clone());
+    //             node.right.borrow().substitute(param, tr.clone());
+    //         }
+    //         Tree::Var(node) => {
+    //             if node.var == *param {
+    //                 let new_subt = (*tr).clone();
+    //                 if let Some(ref parent_rc) = node.parent.borrow().upgrade() {
+    //                     new_subt.set_parent(parent_rc);
+    //                     // parentのフィールドに代入する
+    //                     // applyの場合、左か右かを分かるようにする必要がある
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
@@ -154,18 +154,18 @@ fn at_eof(tok: &VecDeque<Token>) -> bool {
     tok[0] == Token::EOF
 }
 
-pub fn parse(mut tstream: VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
+pub fn parse(mut tstream: VecDeque<Token>) -> ParseResult {
     let tree = term(&mut tstream)?;
     Ok(tree)
 }
 
-fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
+fn term(tok: &mut VecDeque<Token>) -> ParseResult {
     if consume_token(tok, "λ").is_ok() || consume_token(tok, "\\").is_ok() {
         // ABS
         // パラメタを読み込む
         let mut params = VecDeque::new();
         while let Some(rc) = primary(tok)? {
-            if let Tree::Var(ref node) = *rc {
+            if let Tree::Var(ref node) = *rc.borrow() {
                 params.push_back(node.var.clone());
             } else {
                 return Err(ParseError::SyntaxError);
@@ -178,12 +178,12 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
         if let Some(mut subt) = term(tok)? {
             // 各パラメタについてAbsNodeを作る
             while let Some(param_name) = params.pop_back() {
-                let parent = Rc::new(Tree::Abs(AbsNode {
-                    parent: RefCell::new(Weak::new()),
+                let parent = Rc::new(RefCell::new(Tree::Abs(AbsNode {
+                    parent: Weak::new(),
                     var: param_name,
-                    subterm: RefCell::new(subt.clone()),
-                }));
-                subt.set_parent(&parent);
+                    subterm: subt.clone(),
+                })));
+                subt.borrow_mut().set_parent(Rc::clone(&parent));
                 subt = parent;
             }
             Ok(Some(subt))
@@ -194,7 +194,7 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
         // primary+
         let mut subterms = VecDeque::new();
         while let Some(subt) = primary(tok)? {
-            subterms.push_back(subt);
+            subterms.push_back(subt.clone());
         }
 
         match subterms.len() {
@@ -204,14 +204,14 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
                 let mut left = subterms.pop_front().unwrap();
 
                 while let Some(right) = subterms.pop_front() {
-                    let parent = Rc::new(Tree::Apply(ApplyNode {
-                        parent: RefCell::new(Weak::new()),
-                        is_redex: matches!(*left, Tree::Abs(_)),
-                        left: RefCell::new(left.clone()),
-                        right: RefCell::new(right.clone()),
-                    }));
-                    left.set_parent(&parent);
-                    right.set_parent(&parent);
+                    let parent = Rc::new(RefCell::new(Tree::Apply(ApplyNode {
+                        parent: Weak::new(),
+                        is_redex: matches!(*left.borrow(), Tree::Abs(_)),
+                        left: left.clone(),
+                        right: right.clone(),
+                    })));
+                    left.borrow_mut().set_parent(Rc::clone(&parent));
+                    right.borrow_mut().set_parent(Rc::clone(&parent));
                     left = parent;
                 }
                 Ok(Some(left))
@@ -222,16 +222,16 @@ fn term(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
     }
 }
 
-fn primary(tok: &mut VecDeque<Token>) -> Result<Option<Rc<Tree>>, ParseError> {
+fn primary(tok: &mut VecDeque<Token>) -> ParseResult {
     if consume_token(tok, "(").is_ok() {
         term(tok)
     } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Rc::new(Tree::Var(VarNode {
-            parent: RefCell::new(Weak::new()),
+        Ok(Some(Rc::new(RefCell::new(Tree::Var(VarNode {
+            parent: Weak::new(),
             var: s,
-        }))))
+        })))))
     } else {
         Err(ParseError::SyntaxError)
     }
