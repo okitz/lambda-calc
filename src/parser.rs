@@ -247,7 +247,7 @@ impl Node {
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
-    if tok.is_empty() {
+    if tok.is_empty() || at_eof(tok) {
         Err(ParseError::SyntaxError)
     } else {
         let target = Token::new(target.to_string())?;
@@ -261,13 +261,27 @@ fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseErr
     }
 }
 
+fn peek_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
+    if tok.is_empty() || at_eof(tok) {
+        Err(ParseError::SyntaxError)
+    } else {
+        let target = Token::new(target.to_string())?;
+        match tok[0] {
+            _ if tok[0] == target => Ok(()),
+            _ => Err(ParseError::UnexpectedToken),
+        }
+    }
+}
+
 fn at_eof(tok: &VecDeque<Token>) -> bool {
     tok[0] == Token::EOF
 }
 
 pub fn parse(mut tstream: VecDeque<Token>) -> ASTResult {
     let term_node = term(&mut tstream)?;
-    if let Some(term_node) = term_node {
+    if !at_eof(&tstream) {
+        Err(ParseError::SyntaxError)
+    } else if let Some(term_node) = term_node {
         Ok(Some(AST {
             root: Node::new(NodeType::Root(RootNode {
                 term: Rc::clone(&term_node),
@@ -290,10 +304,10 @@ fn term(tok: &mut VecDeque<Token>) -> ParseResult {
                 return Err(ParseError::SyntaxError);
             }
         }
+        consume_token(tok, ".")?;
         if params.is_empty() {
             return Err(ParseError::SyntaxError);
         }
-
         if let Some(mut subt) = term(tok)? {
             // 各パラメタについてAbsNodeを作る
             while let Some(param_name) = params.pop_back() {
@@ -313,7 +327,6 @@ fn term(tok: &mut VecDeque<Token>) -> ParseResult {
         while let Some(subt) = primary(tok)? {
             subterms.push_back(subt.clone());
         }
-
         match subterms.len() {
             0 => Err(ParseError::SyntaxError),
             1 => Ok(Some(subterms.pop_front().unwrap())),
@@ -337,8 +350,10 @@ fn term(tok: &mut VecDeque<Token>) -> ParseResult {
 
 fn primary(tok: &mut VecDeque<Token>) -> ParseResult {
     if consume_token(tok, "(").is_ok() {
-        term(tok)
-    } else if consume_token(tok, ")").is_ok() || consume_token(tok, ".").is_ok() || at_eof(tok) {
+        let tm = term(tok);
+        consume_token(tok, ")")?;
+        tm
+    } else if peek_token(tok, ")").is_ok() || peek_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
         Ok(Some(Node::new(NodeType::Var(VarNode { var: s }))))

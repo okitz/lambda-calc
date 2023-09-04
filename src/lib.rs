@@ -12,10 +12,10 @@ pub fn run(input: &str) -> Result<(), Box<dyn Error>> {
     syntax_tree.evaluate();
     println!("sub1: {:?}", syntax_tree.root.borrow().stringify());
     syntax_tree.evaluate();
-    syntax_tree.evaluate();
-    syntax_tree.evaluate();
-    syntax_tree.evaluate();
     println!("sub2: {:?}", syntax_tree.root.borrow().stringify());
-
+    syntax_tree.evaluate();
+    println!("sub3: {:?}", syntax_tree.root.borrow().stringify());
+    syntax_tree.evaluate();
+    println!("sub4: {:?}", syntax_tree.root.borrow().stringify());
     Ok(())
 }
