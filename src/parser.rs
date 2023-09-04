@@ -10,9 +10,6 @@ use std::rc::{Rc, Weak};
 // primary = var | "(" term ")"
 
 #[derive(Debug)]
-struct UnexpectedTokenError;
-
-#[derive(Debug)]
 pub enum ParseError {
     UnexpectedToken,
     SyntaxError,
@@ -36,16 +33,16 @@ impl From<tokenizer::InvalidToken> for ParseError {
 }
 
 #[derive(Debug, Clone)]
-pub struct AST {
+pub struct Ast {
     pub root: RccellNode,
 }
 
 #[derive(Debug, Clone)]
 pub enum NodeType {
-    Abs(AbsNode),
-    Apply(ApplyNode),
-    Var(VarNode),
-    Root(RootNode),
+    Abs { var: String, subterm: RccellNode },
+    Apply { left: RccellNode, right: RccellNode },
+    Var { var: String },
+    Root { term: RccellNode },
 }
 
 #[derive(Debug, Clone)]
@@ -68,17 +65,17 @@ impl Node {
         {
             // new_node を子ノードの parent として設定
             match &rc.borrow().node_type {
-                NodeType::Root(ref data) => {
-                    data.term.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref))
+                NodeType::Root { term } => {
+                    term.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref))
                 }
-                NodeType::Abs(ref data) => {
-                    data.subterm.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref))
+                NodeType::Abs { var: _, subterm } => {
+                    subterm.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref))
                 }
-                NodeType::Apply(ref data) => {
-                    data.left.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref));
-                    data.right.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref));
+                NodeType::Apply { left, right } => {
+                    left.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref));
+                    right.borrow_mut().parent = Some(Weak::clone(&rc.borrow().self_ref));
                 }
-                NodeType::Var(_) => {}
+                NodeType::Var { .. } => {}
             };
         }
         rc
@@ -88,31 +85,8 @@ impl Node {
 type RccellNode = Rc<RefCell<Node>>;
 type WkcellNode = Weak<RefCell<Node>>;
 type ParseResult = Result<Option<RccellNode>, ParseError>;
-type ASTResult = Result<Option<AST>, ParseError>;
-
-#[derive(Debug, Clone)]
-pub struct AbsNode {
-    var: String,
-    subterm: RccellNode,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApplyNode {
-    left: RccellNode,
-    right: RccellNode,
-}
-
-#[derive(Debug, Clone)]
-pub struct VarNode {
-    var: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct RootNode {
-    term: RccellNode,
-}
-
-impl AST {
+type AstResult = Result<Option<Ast>, ParseError>;
+impl Ast {
     pub fn evaluate(&self) {
         let redex = self.root.borrow().find_leftmost_redex();
         if let Some(redex) = redex {
@@ -125,84 +99,83 @@ impl AST {
 impl Node {
     fn deep_clone(&self) -> RccellNode {
         let node_type = match &self.node_type {
-            NodeType::Root(data) => NodeType::Root(RootNode {
-                term: data.term.borrow().deep_clone(),
-            }),
-            NodeType::Abs(data) => NodeType::Abs(AbsNode {
-                var: data.var.clone(),
-                subterm: data.subterm.borrow().deep_clone(),
-            }),
-            NodeType::Apply(data) => NodeType::Apply(ApplyNode {
-                left: data.left.borrow().deep_clone(),
-                right: data.right.borrow().deep_clone(),
-            }),
-            NodeType::Var(data) => NodeType::Var(data.clone()),
+            NodeType::Root { term } => NodeType::Root {
+                term: term.borrow().deep_clone(),
+            },
+            NodeType::Abs { var, subterm } => NodeType::Abs {
+                var: var.clone(),
+                subterm: subterm.borrow().deep_clone(),
+            },
+            NodeType::Apply { left, right } => NodeType::Apply {
+                left: left.borrow().deep_clone(),
+                right: right.borrow().deep_clone(),
+            },
+            NodeType::Var { var } => NodeType::Var { var: var.clone() },
         };
         Node::new(node_type)
     }
 
     pub fn stringify(&self) -> String {
         match &self.node_type {
-            NodeType::Root(data) => data.term.borrow().stringify(),
-            NodeType::Abs(data) => {
-                let subt = data.subterm.borrow();
-                format!("λ{}.{}", data.var, subt.stringify())
+            NodeType::Root { term } => term.borrow().stringify(),
+            NodeType::Abs { var, subterm } => {
+                let subt = subterm.borrow();
+                format!("λ{}.{}", var, subt.stringify())
             }
-            NodeType::Apply(data) => {
+            NodeType::Apply { left, right } => {
                 let make_substr = |nd: &Node| match nd.node_type {
-                    NodeType::Var(_) => nd.stringify(),
+                    NodeType::Var { .. } => nd.stringify(),
                     _ => format!("({})", nd.stringify()),
                 };
-                let lstr = make_substr(&*data.left.borrow());
-                let rstr = make_substr(&*data.right.borrow());
+                let lstr = make_substr(&left.borrow());
+                let rstr = make_substr(&right.borrow());
                 lstr + " " + &rstr
             }
-            NodeType::Var(data) => data.var.clone(),
+            NodeType::Var { var } => var.clone(),
         }
     }
 
     pub fn find_leftmost_redex(&self) -> Option<RccellNode> {
-        match self.node_type {
-            NodeType::Root(ref data) => data.term.borrow().find_leftmost_redex(),
-            NodeType::Abs(ref data) => data.subterm.borrow().find_leftmost_redex(),
-            NodeType::Apply(ref data) => {
-                if let NodeType::Abs(_) = data.left.borrow().node_type {
+        match &self.node_type {
+            NodeType::Root { term } => term.borrow().find_leftmost_redex(),
+            NodeType::Abs { subterm, .. } => subterm.borrow().find_leftmost_redex(),
+            NodeType::Apply { left, right } => {
+                if let NodeType::Abs { .. } = left.borrow().node_type {
                     self.self_ref.upgrade()
                 } else {
-                    data.left
-                        .borrow()
+                    left.borrow()
                         .find_leftmost_redex()
-                        .or_else(|| data.right.borrow().find_leftmost_redex())
+                        .or_else(|| right.borrow().find_leftmost_redex())
                 }
             }
-            NodeType::Var(_) => None,
+            NodeType::Var { .. } => None,
         }
     }
 
     pub fn substitute(&self, param: &String, src: RccellNode) -> RccellNode {
         match &self.node_type {
-            NodeType::Root(data) => {
-                let substituted = data.term.borrow().substitute(param, Rc::clone(&src));
-                Node::new(NodeType::Root(RootNode { term: substituted }))
+            NodeType::Root { term } => {
+                let substituted = term.borrow().substitute(param, Rc::clone(&src));
+                Node::new(NodeType::Root { term: substituted })
             }
-            NodeType::Abs(data) => {
-                if data.var != *param {
-                    let subterm = data.subterm.borrow().substitute(param, Rc::clone(&src));
-                    Node::new(NodeType::Abs(AbsNode {
-                        var: data.var.clone(),
+            NodeType::Abs { var, subterm } => {
+                if var != param {
+                    let subterm = subterm.borrow().substitute(param, Rc::clone(&src));
+                    Node::new(NodeType::Abs {
+                        var: var.clone(),
                         subterm,
-                    }))
+                    })
                 } else {
                     self.self_ref.upgrade().unwrap()
                 }
             }
-            NodeType::Apply(data) => {
-                let left = data.left.borrow().substitute(param, Rc::clone(&src));
-                let right = data.right.borrow().substitute(param, Rc::clone(&src));
-                Node::new(NodeType::Apply(ApplyNode { left, right }))
+            NodeType::Apply { left, right } => {
+                let left = left.borrow().substitute(param, Rc::clone(&src));
+                let right = right.borrow().substitute(param, Rc::clone(&src));
+                Node::new(NodeType::Apply { left, right })
             }
-            NodeType::Var(data) => {
-                if data.var == *param {
+            NodeType::Var { var } => {
+                if var == param {
                     src.borrow().deep_clone()
                 } else {
                     self.self_ref.upgrade().unwrap()
@@ -212,13 +185,20 @@ impl Node {
     }
 
     fn reduce(&self) {
-        if let NodeType::Apply(ref apply_data) = self.node_type {
-            let abs = apply_data.left.clone();
-            let src = apply_data.right.clone();
-            if let NodeType::Abs(ref abs_data) = abs.borrow().node_type {
-                let prm = abs_data.var.clone();
-                let tar = abs_data.subterm.clone();
-                let substituted_subterm = tar.borrow().substitute(&prm, src);
+        if let NodeType::Apply {
+            left: abs,
+            right: src,
+        } = &self.node_type
+        {
+            let abs = Rc::clone(abs);
+            let src = Rc::clone(src);
+            if let NodeType::Abs {
+                var: prm,
+                subterm: tar,
+            } = &abs.borrow().node_type
+            {
+                let tar = Rc::clone(tar);
+                let substituted_subterm = tar.borrow().substitute(prm, src);
                 {
                     println!(
                         "reduced subterm: {:?}",
@@ -229,16 +209,18 @@ impl Node {
                 if let Some(parent_rc) = &self.parent {
                     let parent_rc = parent_rc.upgrade().unwrap();
                     match &mut parent_rc.borrow_mut().node_type {
-                        NodeType::Root(data) => data.term = substituted_subterm.clone(),
-                        NodeType::Abs(data) => data.subterm = substituted_subterm.clone(),
-                        NodeType::Apply(data) => {
-                            if std::ptr::eq(self, &*data.left.borrow()) {
-                                data.left = substituted_subterm.clone()
+                        NodeType::Root { term } => *term = Rc::clone(&substituted_subterm),
+                        NodeType::Abs { var: _, subterm } => {
+                            *subterm = Rc::clone(&substituted_subterm)
+                        }
+                        NodeType::Apply { left, right } => {
+                            if std::ptr::eq(self, &*left.borrow()) {
+                                *left = Rc::clone(&substituted_subterm)
                             } else {
-                                data.right = substituted_subterm.clone()
+                                *right = Rc::clone(&substituted_subterm)
                             }
                         }
-                        NodeType::Var(_) => {}
+                        NodeType::Var { .. } => {}
                     };
                 }
             };
@@ -247,7 +229,7 @@ impl Node {
 }
 
 fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
-    if tok.is_empty() || at_eof(tok) {
+    if at_eof(tok) {
         Err(ParseError::SyntaxError)
     } else {
         let target = Token::new(target.to_string())?;
@@ -262,7 +244,7 @@ fn consume_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseErr
 }
 
 fn peek_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError> {
-    if tok.is_empty() || at_eof(tok) {
+    if at_eof(tok) {
         Err(ParseError::SyntaxError)
     } else {
         let target = Token::new(target.to_string())?;
@@ -274,18 +256,18 @@ fn peek_token(tok: &mut VecDeque<Token>, target: &str) -> Result<(), ParseError>
 }
 
 fn at_eof(tok: &VecDeque<Token>) -> bool {
-    tok[0] == Token::EOF
+    tok[0] == Token::Eof
 }
 
-pub fn parse(mut tstream: VecDeque<Token>) -> ASTResult {
+pub fn parse(mut tstream: VecDeque<Token>) -> AstResult {
     let term_node = term(&mut tstream)?;
     if !at_eof(&tstream) {
         Err(ParseError::SyntaxError)
     } else if let Some(term_node) = term_node {
-        Ok(Some(AST {
-            root: Node::new(NodeType::Root(RootNode {
+        Ok(Some(Ast {
+            root: Node::new(NodeType::Root {
                 term: Rc::clone(&term_node),
-            })),
+            }),
         }))
     } else {
         Ok(None)
@@ -298,8 +280,8 @@ fn term(tok: &mut VecDeque<Token>) -> ParseResult {
         // パラメタを読み込む
         let mut params = VecDeque::new();
         while let Some(rc) = primary(tok)? {
-            if let NodeType::Var(ref data) = rc.borrow().node_type {
-                params.push_back(data.var.clone());
+            if let NodeType::Var { var } = &rc.borrow().node_type {
+                params.push_back(var.clone());
             } else {
                 return Err(ParseError::SyntaxError);
             }
@@ -311,21 +293,21 @@ fn term(tok: &mut VecDeque<Token>) -> ParseResult {
         if let Some(mut subt) = term(tok)? {
             // 各パラメタについてAbsNodeを作る
             while let Some(param_name) = params.pop_back() {
-                let parent_rc = Node::new(NodeType::Abs(AbsNode {
+                let parent_rc = Node::new(NodeType::Abs {
                     var: param_name,
-                    subterm: subt.clone(),
-                }));
+                    subterm: Rc::clone(&subt),
+                });
                 subt = parent_rc;
             }
             Ok(Some(subt))
         } else {
             Err(ParseError::SyntaxError)
         }
-    } else if !tok.is_empty() {
+    } else if !at_eof(tok) {
         // primary+
         let mut subterms = VecDeque::new();
         while let Some(subt) = primary(tok)? {
-            subterms.push_back(subt.clone());
+            subterms.push_back(Rc::clone(&subt));
         }
         match subterms.len() {
             0 => Err(ParseError::SyntaxError),
@@ -334,10 +316,10 @@ fn term(tok: &mut VecDeque<Token>) -> ParseResult {
                 let mut left = subterms.pop_front().unwrap();
 
                 while let Some(right) = subterms.pop_front() {
-                    let parent_rc = Node::new(NodeType::Apply(ApplyNode {
-                        left: left.clone(),
-                        right: right.clone(),
-                    }));
+                    let parent_rc = Node::new(NodeType::Apply {
+                        left: Rc::clone(&left),
+                        right: Rc::clone(&right),
+                    });
                     left = parent_rc;
                 }
                 Ok(Some(left))
@@ -356,7 +338,7 @@ fn primary(tok: &mut VecDeque<Token>) -> ParseResult {
     } else if peek_token(tok, ")").is_ok() || peek_token(tok, ".").is_ok() || at_eof(tok) {
         Ok(None)
     } else if let Some(Token::Var(s)) = tok.pop_front() {
-        Ok(Some(Node::new(NodeType::Var(VarNode { var: s }))))
+        Ok(Some(Node::new(NodeType::Var { var: s })))
     } else {
         Err(ParseError::SyntaxError)
     }

@@ -25,12 +25,12 @@ fn is_symbol(s: &str) -> bool {
 pub enum Token {
     Var(String),
     Symbol(String),
-    EOF,
+    Eof,
 }
 impl Token {
     pub fn new(s: String) -> Result<Token, InvalidToken> {
         if s.is_empty() {
-            Ok(Token::EOF)
+            Ok(Token::Eof)
         } else if is_var(&s) {
             Ok(Token::Var(s))
         } else if is_symbol(&s) {
@@ -52,7 +52,7 @@ pub fn tokenize(input: &str) -> Result<VecDeque<Token>, InvalidToken> {
     let mut tstream = VecDeque::new();
     loop {
         let tok = Token::new_from_chars(&mut input)?;
-        let is_eof = tok == Token::EOF;
+        let is_eof = tok == Token::Eof;
         tstream.push_back(tok);
         if is_eof {
             break;
@@ -71,7 +71,7 @@ mod tests {
         let c2t = |c| Token::Var(String::from(c));
         let test_str = "\\x.(x y)";
         let mut expect: VecDeque<Token> = test_str.chars().filter(|c| *c != ' ').map(c2t).collect();
-        expect.push_back(Token::EOF);
+        expect.push_back(Token::Eof);
         assert_eq!(expect, tokenize(test_str).unwrap());
     }
 }
